@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-Counselling: Virtual Mental Health Companion</title>
+  <link rel="stylesheet" href="../css/normalize.css" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="../css/font-root-styles/general-sans.css" />
+  <link rel="stylesheet" href="../css/font-root-styles/okinesans.css" />
+  <link rel="stylesheet" href="../css/font-root-styles/satoshi.css" />
+  <link rel="stylesheet" href="../css/ai_councelling.css" />
+</head>
+<body>
+
+<header>
+  <h1>AI-Counselling: Virtual Mental Health Companion</h1>
+  <div class="separator"></div>
+</header>
+
+<main>
+  <article>
+    <section class="content-section">
+      <h2>Overview</h2>
+      <p>
+        AI-Counselling is a virtual mental-health companion that supports users across text chat, voice, and video.
+        The system combines real-time emotion detection, speech-to-text, tone analysis, and retrieval-augmented
+        generation (RAG) grounded in the DSM-5 to deliver supportive, empathetic responses. The frontend is built in
+        Next.js with Clerk authentication and a personalized onboarding flow, while a FastAPI backend handles media
+        processing and AI inference.
+      </p>
+      <p>
+        From a data-science perspective, the product is a multimodal pipeline: audio and video streams are collected,
+        cleaned, normalized, and converted into structured signals (transcripts, emotion labels, confidence scores),
+        then fused with a retrieval layer that anchors the LLM to clinically relevant context.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Problem and Goal</h2>
+      <p>
+        People often need immediate, low-friction emotional support before they are ready to seek professional help.
+        This project focuses on creating a safe, accessible companion that listens, reflects, and offers practical
+        guidance while remaining clear about its boundaries. It is designed to complement care and encourage users
+        to seek licensed help when appropriate.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Core User Experience</h2>
+      <p>
+        Users can choose a preferred mode (text, voice, or video) during onboarding. The experience adapts to their
+        choice, while still using a consistent safety policy and a shared knowledge base.
+      </p>
+      <ul>
+        <li><strong>Text:</strong> A chat interface that sends user messages to the backend and returns an empathetic response.</li>
+        <li><strong>Voice:</strong> A voice recorder streams audio chunks to cloud storage and triggers speech processing.</li>
+        <li><strong>Video:</strong> A video recorder captures facial expressions and integrates tone analysis and transcript context.</li>
+      </ul>
+    </section>
+
+    <section class="content-section">
+      <h2>Onboarding and Personalization</h2>
+      <p>
+        The onboarding wizard collects high-level context such as age range, concerns, goals, cross-cutting symptoms,
+        and preferences. This information is stored in MongoDB and used to tailor responses. The selected mode is
+        saved to Clerk public metadata so the home experience loads the preferred interaction style by default.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Safety and Boundaries</h2>
+      <p>
+        A lightweight safety filter checks for high-risk language (for example, self-harm phrases) and provides an
+        immediate supportive response. The system avoids providing medical advice and focuses on emotional support
+        and grounding guidance.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Architecture</h2>
+      <p>
+        The system uses a Next.js frontend connected to a FastAPI backend. Media is uploaded to Google Cloud Storage,
+        and MongoDB stores user profiles and chat history. The backend performs emotion and tone analysis, speech
+        transcription, and retrieval-augmented generation with the DSM-5.
+      </p>
+      <figure>
+        <img src="architecture.png" alt="AI-Counselling architecture diagram" />
+        <figcaption>Figure 1: High-level architecture for AI-Counselling.</figcaption>
+      </figure>
+    </section>
+
+    <section class="content-section">
+      <h2>Retrieval-Augmented Generation (RAG)</h2>
+      <p>
+        The DSM-5 is chunked into short passages and embedded with Sentence Transformers. These embeddings are stored
+        in a FAISS index to enable fast similarity search. When a user sends a message or a transcript is generated,
+        the backend retrieves the most relevant chunks and includes them in the prompt to Gemini. This keeps responses
+        grounded in structured clinical context while remaining empathetic and user-friendly.
+      </p>
+      <p>
+        The chunking strategy uses fixed-size word windows (300 words per chunk). Embeddings are normalized and queried
+        with cosine similarity via FAISS IndexFlatIP, returning the top-K (K=5) passages. This lightweight vector
+        database avoids external services while enabling fast, in-memory semantic retrieval for each request.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Voice Analysis Pipeline</h2>
+      <p>
+        The voice flow records short audio chunks in the browser and uploads them to GCS. The backend downloads recent
+        chunks, normalizes and cleans the audio, and performs speech emotion recognition using Wav2Vec2. The output is
+        summarized into phases and distribution statistics, which are then used to shape the assistant's response.
+      </p>
+      <p>
+        On ingestion, audio is resampled to 16 kHz mono, passed through high/low-pass filters (100 Hz–8 kHz), normalized,
+        and compressed for dynamic range stability. The recognizer uses an ensemble strategy: each 1-second chunk is
+        evaluated multiple times with a Wav2Vec2 emotion classifier, then aggregated with majority voting and confidence
+        weighting. The pipeline yields emotion phases, total duration, and average confidence for downstream prompting.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Speech-to-Text</h2>
+      <p>
+        Audio is decoded robustly (with FFmpeg fallback), normalized, chunked, and sent to the Google speech API for
+        transcription. The transcript is combined with RAG context and user profile data to generate a supportive
+        response that reflects both content and tone.
+      </p>
+      <p>
+        The transcription path supports noisy, real-world audio by attempting tolerant decoding (FFmpeg) when direct
+        parsing fails. Audio is chunked into 50-second segments to reduce API errors and improve recognition accuracy,
+        then stitched into a single transcript for retrieval and response generation.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Video Emotion Detection</h2>
+      <p>
+        Video recordings are processed server-side with OpenCV. Each frame is analyzed with DeepFace to detect
+        dominant facial emotions. The final emotion is computed by majority vote. This signal, along with tone
+        analysis and transcript context, informs the assistant's final reply.
+      </p>
+      <p>
+        DeepFace runs per-frame inference with detection fallback disabled to avoid hard failures on low-quality frames.
+        The system aggregates the per-frame labels into a dominant emotion using a simple frequency model, balancing
+        robustness and latency for real-time feedback.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>LLM Prompting and Response Generation</h2>
+      <p>
+        The final response is composed from multiple signals: user text or transcript, detected facial emotion,
+        Wav2Vec2 tone analysis, relevant DSM-5 retrieval chunks, and the user's onboarding profile. These inputs are
+        injected into a structured prompt for Gemini to produce concise, empathetic guidance while respecting safety
+        constraints and avoiding medical advice.
+      </p>
+      <ul>
+        <li><code>POST /respond</code> - text chat response with RAG and chat history</li>
+        <li><code>POST /detect_video_emotions</code> - video upload with facial emotion analysis</li>
+        <li><code>GET /process_speech</code> - process recent voice chunks and return a final response</li>
+        <li><code>POST /api/audio</code> - Next.js route to upload audio frames to GCS</li>
+        <li><code>POST /api/uploadVideo</code> - Next.js helper route for media uploads</li>
+      </ul>
+    </section>
+
+    <section class="content-section">
+      <h2>Data and Storage</h2>
+      <p>
+        User profiles, onboarding data, and chat history are stored in MongoDB. Media assets (audio frames and video
+        recordings) are stored in Google Cloud Storage with user-specific prefixes for isolation. This separation
+        keeps application data structured while enabling scalable media processing.
+      </p>
+      <p>
+        Chat history is queried for the most recent exchanges to provide short-term conversational memory, while
+        questionnaire data supplies stable personalization signals. These sources are used alongside RAG to reduce
+        hallucinations and keep responses grounded in user context.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Tech Stack</h2>
+      <ul>
+        <li><strong>Frontend:</strong> Next.js 15, React 19, Tailwind CSS, Clerk</li>
+        <li><strong>Backend:</strong> FastAPI, Uvicorn, Python 3.12</li>
+        <li><strong>AI/ML:</strong> Google Gemini, DeepFace, Wav2Vec2, Sentence Transformers, FAISS</li>
+        <li><strong>Data:</strong> MongoDB Atlas, Google Cloud Storage</li>
+        <li><strong>Audio:</strong> Librosa, Pydub, FFmpeg, SpeechRecognition</li>
+      </ul>
+      <p>
+        The ML stack is intentionally modular: each modality (text, voice, video) produces interpretable intermediate
+        outputs that can be logged, analyzed, and improved independently without rebuilding the entire system.
+      </p>
+    </section>
+
+    <section class="content-section">
+      <h2>Conclusion</h2>
+      <p>
+        AI-Counselling demonstrates how a modern, multimodal assistant can blend emotional signals with grounded
+        knowledge to deliver supportive, personalized guidance. The project brings together real-time media
+        processing, retrieval-augmented generation, and a thoughtful onboarding experience to create a companion that
+        feels responsive and safe.
+      </p>
+    </section>
+  </article>
+</main>
+
+<footer>
+  <p>Designed and Developed by <span>Madhu Siddharth Suthagar</span></p>
+</footer>
+<script type="text/javascript" src="../js/main.js"></script>
+</body>
+</html>
