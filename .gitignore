@@ -54,3 +54,5 @@ yarn-error.log*
 *.key
 credentials.json
 
+# md files
+QUICK_START.md
