@@ -26,7 +26,6 @@ ai-counselling/
 ├── next-env.d.ts              # Next.js TypeScript definitions
 │
 ├── requirements.txt           # Python dependencies
-├── environment.yml            # Conda environment file (optional)
 │
 ├── src/                       # Next.js/React Frontend
 │   ├── middleware.ts          # Next.js middleware
@@ -76,7 +75,7 @@ ai-counselling/
 │   └── (other assets)
 │
 ├── backend/                   # FastAPI Backend
-│   ├── main2.py               # Main FastAPI application
+│   ├── main.py               # Main FastAPI application
 │   ├── speech_to_text.py      # Speech-to-text processing
 │   ├── process_audio_tone.py  # Audio tone analysis
 │   ├── mongodb_fetcher.py     # MongoDB helper functions
@@ -85,7 +84,7 @@ ai-counselling/
 │
 ├── run_emotion_analysis.py    # Standalone emotion analysis script
 ├── test_emotion_recognition.py # Emotion recognition tests
-└── voice_module.ipynb         # Jupyter notebook for voice analysis
+
 ```
 
 ## Key Files Explained
@@ -120,7 +119,7 @@ ai-counselling/
 
 ## Backend Structure (FastAPI)
 
-- **main2.py** - Entry point with API endpoints
+- **main.py** - Entry point with API endpoints
 - **speech_to_text.py** - Speech recognition processing
 - **process_audio_tone.py** - Emotional tone analysis from audio
 - **mongodb_fetcher.py** - Database query helpers
@@ -140,7 +139,7 @@ ai-counselling/
    
    # Run development servers
    npm run dev          # Terminal 1: Frontend on :3000
-   python backend/main2.py  # Terminal 2: Backend on :8000
+   python backend/main.py  # Terminal 2: Backend on :8000
    ```
 
 2. **Deploy to Production**

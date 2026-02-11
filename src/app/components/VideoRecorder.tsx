@@ -59,8 +59,9 @@ export default function VideoRecorder({ userId }: { userId?: string }) {
         alert(`Therapist says: ${data.final_response}`); // Simple feedback for now
       }
 
-    } catch (e: any) {
-      setStatus(`Error: ${e.message}`);
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      setStatus(`Error: ${errorMessage}`);
     }
   }
 

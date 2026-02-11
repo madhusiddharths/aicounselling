@@ -21,7 +21,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Start the FastAPI server
-python backend/main2.py
+python backend/main.py
 ```
 
 ### 3. Frontend Setup
@@ -91,4 +91,4 @@ Instead of managing JSON key files, this project uses **Application Default Cred
 
 ## 📐 Architecture
 
-![App Architecture](architecture.png)
+![App Architecture](docs/architecture.png)

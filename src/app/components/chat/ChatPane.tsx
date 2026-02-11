@@ -198,10 +198,12 @@ const handleSend = async (text: string): Promise<void> => {
   setInput('');
   setLoading(true);
 
+  const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
+
   try {
     // Call backend
-    const res = await axios.post("http://localhost:8000/respond", null, {
-     
+    const res = await axios.post(`${FASTAPI_BASE_URL}/respond`, null, {
+
       params: { msg: trimmed, user_id: user?.id },
     });
 

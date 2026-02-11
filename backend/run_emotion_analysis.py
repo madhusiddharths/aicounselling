@@ -126,12 +126,36 @@ def main():
     print("EMOTION RECOGNITION ANALYSIS")
     print("=" * 60)
     
+    import sys
+    import os
+
     # Initialize recognizer
     recognizer = SimpleEmotionRecognizer()
     
-    # Example usage - replace with your audio file path
-    audio_file = "/Users/madhusiddharthsuthagar/Downloads/input_9.mp3"  # Update this path
-    
+    # Get audio file from command line args or use default
+    if len(sys.argv) > 1:
+        audio_file = sys.argv[1]
+    else:
+        # Check for a sample file in current or parent directory
+        possible_files = [
+            "input.mp3",
+            "test_audio.mp3",
+            "../test_audio.mp3",
+            "sample.wav"
+        ]
+        audio_file = None
+        for f in possible_files:
+            if os.path.exists(f):
+                audio_file = f
+                break
+
+        if not audio_file:
+            print("\n⚠️  No input file provided.")
+            print("Usage: python backend/run_emotion_analysis.py <path_to_audio_file>")
+            return
+
+    print(f"\nProcessing file: {audio_file}")
+
     try:
         results = recognizer.analyze_audio_file(audio_file)
         
