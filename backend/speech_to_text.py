@@ -78,14 +78,20 @@ def download_to_temp(bucket_name: str, key: str) -> str:
 def ffmpeg_decode_to_wav_bytes(in_path: str) -> bytes:
     """Try a tolerant ffmpeg transcode to mono 16k WAV -> bytes."""
     cmd = [
-        "ffmpeg", "-v", "error",
-        "-fflags", "+genpts+discardcorrupt",
+        "ffmpeg", "-y", "-v", "error",
         "-err_detect", "ignore_err",
         "-i", in_path,
         "-ac", "1", "-ar", "16000",
-        "-f", "wav", "pipe:1"
+        "-f", "wav", "-max_muxing_queue_size", "1024", "pipe:1"
     ]
-    return subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    # Do not crash if ffmpeg returns non-zero, as long as it outputs SOME wav bytes
+    try:
+        proc = subprocess.run(cmd, capture_output=True, check=True)
+        return proc.stdout
+    except subprocess.CalledProcessError as e:
+        if len(e.stdout) > 0:
+            return e.stdout  # Salvaged bytes
+        raise e
 
 def load_audio_robust(in_path: str) -> AudioSegment:
     """
@@ -93,11 +99,16 @@ def load_audio_robust(in_path: str) -> AudioSegment:
     Raise on hard failure so caller can try an older object.
     """
     try:
+        # Pydub often fails on incomplete WebM chunks
         return AudioSegment.from_file(in_path)
     except Exception:
         # Fallback: tolerant decode to WAV bytes
-        pcm = ffmpeg_decode_to_wav_bytes(in_path)
-        return AudioSegment.from_file(BytesIO(pcm), format="wav")
+        try:
+            pcm = ffmpeg_decode_to_wav_bytes(in_path)
+            return AudioSegment.from_file(BytesIO(pcm), format="wav")
+        except Exception as e:
+            print(f"Both pydub and ffmpeg fallback failed: {e}")
+            raise
 
 # ---- preprocessing + ASR ----
 def preprocess(seg: AudioSegment) -> AudioSegment:
@@ -148,16 +159,28 @@ def transcribe_key(bucket: str, key: str) -> str:
         try: os.remove(local)
         except OSError: pass
 
+# Global cache of processed keys to prevent replaying the same question
+PROCESSED_AUDIO_KEYS = set()
+
 def collect_last_k_decodable(bucket: str, candidates: list[dict], k: int = 3):
     """Try candidates newest->oldest, decode those that work (up to k), return a single concatenated AudioSegment."""
     got = []
     for obj in candidates:
         key = obj["Key"]
+        
+        # Skip chunks we already processed
+        if key in PROCESSED_AUDIO_KEYS:
+            continue
+            
         try:
             local = download_to_temp(bucket, key)
             raw = load_audio_robust(local)
             got.append(raw)
             print(f"collected: {key}")
+            
+            # Mark as processed
+            PROCESSED_AUDIO_KEYS.add(key)
+            
             if len(got) >= k:
                 break
         except Exception as e:
@@ -165,8 +188,10 @@ def collect_last_k_decodable(bucket: str, candidates: list[dict], k: int = 3):
         finally:
             try: os.remove(local)
             except: pass
+            
     if not got:
-        raise RuntimeError("No decodable audio found.")
+        raise RuntimeError("No new decodable audio found.")
+        
     # concatenate and preprocess once
     merged = got[0]
     for seg in got[1:]:

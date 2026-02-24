@@ -3,12 +3,18 @@ import os
 import base64
 from google.cloud import texttospeech
 
+from google.api_core.client_options import ClientOptions
+
 def synthesize_text(text: str) -> str:
     """
     Synthesizes speech from the input string of text.
     Returns the Audio Content as a Base64 encoded string.
     """
-    client = texttospeech.TextToSpeechClient()
+    credentials_path = os.environ.get("TTS_CREDENTIALS")
+    if credentials_path and os.path.exists(credentials_path):
+        client = texttospeech.TextToSpeechClient.from_service_account_file(credentials_path)
+    else:
+        client = texttospeech.TextToSpeechClient()
 
     input_text = texttospeech.SynthesisInput(text=text)
 

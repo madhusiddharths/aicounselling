@@ -6,6 +6,51 @@ load_dotenv(override=True)
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import sys
+import logging
+
+# Set up global logging to backend.log and standard out
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("backend.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+class StreamToLogger(object):
+    """Fake file-like stream object that redirects writes to a logger instance."""
+    def __init__(self, logger, log_level=logging.INFO):
+        self.logger = logger
+        self.log_level = log_level
+
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            line_str = str(line).strip()
+            if not line_str:
+                continue
+            
+            # Filter out noisy library output to keep logs clean
+            noisy_prefixes = ("Batches: ", "Loading weights: ", "Wav2Vec2ForSequenceClassification", 
+                              "MPNetModel", "Key ", "---", "classifier.", "projector.", 
+                              "Notes:", "- UNEXPECTED", "- MISSING", "Embeddings shape", 
+                              "Total chunks", "HTTP Request: HEAD")
+            
+            if line_str.startswith(noisy_prefixes):
+                continue
+            
+            self.logger.log(self.log_level, line_str)
+
+    def flush(self):
+        pass
+        
+    def isatty(self):
+        return False
+
+# Redirect stdout and stderr to logging
+sys.stdout = StreamToLogger(logging.getLogger('STDOUT'), logging.INFO)
+sys.stderr = StreamToLogger(logging.getLogger('STDERR'), logging.ERROR)
 import cv2
 from deepface import DeepFace
 from collections import Counter

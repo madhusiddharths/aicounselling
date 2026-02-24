@@ -110,12 +110,6 @@ export default function Hero() {
               {isLoaded && user?.id ? (
                 <>
                   <VoiceCircle userId={user.id} uploadUrl="/api/audio" />
-                  <button
-                    onClick={processSpeech}
-                    className="btn-primary w-full max-w-xs"
-                  >
-                    Process Speech
-                  </button>
                 </>
               ) : (
                 <div className="text-center space-y-4">

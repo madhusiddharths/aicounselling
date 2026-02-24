@@ -3,32 +3,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 type Props = {
-  userId: string;              // <-- add
-  uploadUrl?: string;          // <-- add (default to /api/uploadAudio)
+  userId: string;
+  uploadUrl?: string;
   size?: number;
-};
-
-type PendingFrame = {
-  blob: Blob;
-  tsMs: number;
-  seq: number;
 };
 
 const VoiceCircle: React.FC<Props> = ({
   userId,
-  uploadUrl = '/api/uploadAudio',
+  uploadUrl = '/api/audio',
   size = 200,
 }) => {
   const [isListening, setIsListening] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isLoaded, setIsLoaded] = useState(true); // Mock loaded state for now
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-
-  const seqRef = useRef(0);
-  const sendingRef = useRef<Promise<void> | null>(null);
-  const pendingRef = useRef<PendingFrame | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   const start = async () => {
     if (recorderRef.current) return;
@@ -49,24 +40,15 @@ const VoiceCircle: React.FC<Props> = ({
 
       const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
 
+      chunksRef.current = [];
       mr.ondataavailable = (ev) => {
-        if (!ev.data || ev.data.size === 0) return;
-        pendingRef.current = {
-          blob: ev.data,
-          tsMs: Date.now(),
-          seq: seqRef.current++,
-        };
-        if (!sendingRef.current) {
-          sendingRef.current = sendLoop();
+        if (ev.data && ev.data.size > 0) {
+          chunksRef.current.push(ev.data);
         }
       };
 
-      mr.onstart = () => {
-        seqRef.current = 0;
-      };
-
       recorderRef.current = mr;
-      mr.start(3000);
+      mr.start(); // collect all in one go until stopped
       setIsListening(true);
     } catch (e) {
       console.error('mic error', e);
@@ -74,79 +56,101 @@ const VoiceCircle: React.FC<Props> = ({
     }
   };
 
-  const stop = () => {
-    setIsListening(false);
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+  const stopRecording = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      if (!recorderRef.current || recorderRef.current.state === 'inactive') {
+        resolve(null);
+        return;
+      }
+      recorderRef.current.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorderRef.current!.mimeType || 'audio/webm' });
+        chunksRef.current = [];
+        resolve(blob);
+      };
       recorderRef.current.stop();
-    }
-    recorderRef.current = null;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
+      setIsListening(false);
+    });
   };
 
-  const sendLoop = async () => {
-    try {
-      while (true) {
-        const next = pendingRef.current;
-        if (!next) break;
-        pendingRef.current = null;
+  const audioContextUnlocked = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-        const file = new File([next.blob], `frame_${next.seq}.webm`, { type: next.blob.type || 'audio/webm' });
-        const form = new FormData();
-        form.append('file', file);
-        form.append('userId', userId);
-        form.append('timestamp', String(next.tsMs));
-        form.append('frameId', String(next.seq));
-
-        const res = await fetch(uploadUrl, { method: 'POST', body: form });
-        if (!res.ok) {
-          console.error('Upload failed', res.status, await res.text().catch(() => ''));
-        }
-      }
-    } finally {
-      sendingRef.current = null;
-      if (pendingRef.current && !sendingRef.current) {
-        sendingRef.current = sendLoop();
-      }
-    }
-  };
+  useEffect(() => {
+    const audio = new Audio();
+    audioRef.current = audio;
+    return () => {
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
 
   const processVoice = async () => {
     try {
-      // Call backend to process the uploaded speech fragments
-      const res = await fetch(`http://localhost:8000/process_speech?userid=${encodeURIComponent(userId)}`);
+      const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
+      const res = await fetch(`${FASTAPI_BASE_URL}/process_speech?userid=${encodeURIComponent(userId)}`);
+
       if (res.ok) {
         const data = await res.json();
 
-        // 1. Play Audio if available
-        if (data.audio_base64) {
-          const audio = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
-          audio.play().catch(e => console.error("Audio play error", e));
+        if (data.audio_base64 && audioRef.current) {
+          audioRef.current.src = `data:audio/mp3;base64,${data.audio_base64}`;
+          try {
+            await audioRef.current.play();
+          } catch (e) {
+            console.error("Audio play error", e);
+            setError("Audio playback blocked by browser.");
+          }
         }
+      } else {
+        setError(`Backend Error: ${res.statusText}`);
       }
     } catch (e) {
       console.error('Processing error', e);
+      setError("Failed to reach server for processing.");
     }
   };
 
-  const onClick = () => {
+  const onClick = async () => {
+    if (!audioContextUnlocked.current && audioRef.current) {
+      audioRef.current.src = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYxLjEuMTAwAAAAAAAAAAAAAAD/+0DAAAAAAAAAAAAAAAAAAAAAAABqb2luZWQAR0A=";
+      audioRef.current.play().catch(() => { });
+      audioContextUnlocked.current = true;
+    }
+
     if (!isListening) {
       start();
     } else {
-      stop();
-      // Small delay to ensure last chunk is processed before calling backend
-      setTimeout(processVoice, 1000);
+      setIsProcessing(true);
+      const blob = await stopRecording();
+
+      if (blob && blob.size > 0) {
+        try {
+          const form = new FormData();
+          form.append('file', new File([blob], `audio_complete.webm`, { type: blob.type }));
+          form.append('userId', userId);
+          form.append('timestamp', String(Date.now()));
+          form.append('frameId', "0");
+
+          const res = await fetch(uploadUrl, { method: 'POST', body: form });
+          if (!res.ok) console.error('Upload failed', res.status);
+        } catch (e) {
+          console.error(e);
+        }
+        await processVoice();
+      }
+
+      setIsProcessing(false);
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      recorderRef.current = null;
     }
   };
 
-  useEffect(() => () => stop(), []);
-
-  // Tailwind-powered circle with green hero palette; minimal-only circle (no X / no text)
   return (
     <div className="flex flex-col items-center justify-center gap-6 w-full">
-      {/* Visualizer / Microphone Circle */}
       <div className={`
         relative flex items-center justify-center w-32 h-32 rounded-full transition-all duration-500
         ${isListening ? 'bg-red-500/20 shadow-[0_0_50px_rgba(239,68,68,0.4)] scale-110' : 'bg-white/5 shadow-glow'}
@@ -176,14 +180,14 @@ const VoiceCircle: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Status Text */}
       <div className="h-6">
-        <p className={`text-sm font-medium transition-colors ${isListening ? 'text-red-300 animate-pulse' : 'text-white/60'}`}>
-          {isListening ? "Listening..." : "Tap to Speak"}
+        <p className={`text-sm font-medium transition-colors ${isProcessing ? 'text-emerald-400 animate-pulse' :
+          isListening ? 'text-red-300 animate-pulse' : 'text-white/60'
+          }`}>
+          {isProcessing ? "Processing Speech..." : isListening ? "Listening..." : "Tap to Speak"}
         </p>
       </div>
 
-      {/* Error Message */}
       {error && (
         <p className="text-xs text-red-400 bg-red-900/20 px-3 py-1 rounded-full border border-red-500/20">
           {error}

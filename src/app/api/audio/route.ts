@@ -5,9 +5,10 @@ import { Storage } from '@google-cloud/storage';
 import { auth } from '@clerk/nextjs/server';
 import { insertAudioMeta } from '@/db/audio';
 
-const storage = new Storage();
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const storage = new Storage();
 
 export async function POST(req: NextRequest) {
   const BUCKET_NAME = process.env.GCS_BUCKET!;
