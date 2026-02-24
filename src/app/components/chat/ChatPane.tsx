@@ -271,7 +271,7 @@ const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="type your message..."
-          className="w-full resize-none border-0 p-0 outline-none focus:ring-0"
+          className="w-full resize-none border-0 p-0 outline-none focus:ring-0 text-zinc-900 bg-transparent placeholder:text-zinc-400"
           rows={2}
         />
         <div className="mt-2 flex items-center justify-end">

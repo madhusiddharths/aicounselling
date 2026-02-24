@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     }
 
     const safeName = (file.name || 'chunk.webm').replace(/[^\w.\-]+/g, '_');
-    const key = `${userId}/audio/frame_${frameId || ts}_${safeName}`;
+    const key = `users/${userId}/audio/frame_${frameId || ts}_${safeName}`;
 
     const body = Buffer.from(await file.arrayBuffer());
     const gcsFile = bucket.file(key);

@@ -22,7 +22,9 @@ from pydub.effects import high_pass_filter, low_pass_filter, compress_dynamic_ra
 from process_audio_tone import SpeechProcessor
 from speech_to_text import transcribe_latest_concat
 from pymongo import MongoClient
-from mongodb_fetcher import fetch_all_from_mongo
+from mongodb_fetcher import fetch_all_from_mongo, client
+from memory import get_user_summary, update_memory_lazily
+import tts
 
 # Configuration
 mongo_db = os.getenv("MONGO_DB", "coach")
@@ -171,7 +173,8 @@ def respond(msg, user_id):
     context_text = "\n".join(relevant_chunks) if relevant_chunks else "No relevant content found in the document."
     
     try:
-        user_data = fetch_all_from_mongo("users", {"user_id": user_id})
+        # User ID from frontend is the Clerk ID, but DB field is clerk_user_id
+        user_data = fetch_all_from_mongo("users", {"clerk_user_id": user_id})
         questionnaire = user_data[0] if user_data else ""
     except Exception as e:
         questionnaire = ""
@@ -189,21 +192,32 @@ def respond(msg, user_id):
         print(f"Error fetching history: {e}")
         history_text = ""
 
+    # Retrieve User Memory
+    try:
+        user_summary = get_user_summary(user_id) # user_id is passed as arg, which is Clerk ID
+    except Exception:
+        user_summary = "No prior memory."
+
     # Build prompt for Gemini
     prompt = f"""
-    Using the following DSM-5 context and conversation history, answer the user's question:
+    Using the following DSM-5 context, Memory, and conversation history, answer the user's question:
 
     DSM-5 Context:
     {context_text}
 
+    User Psychological Profile (Memory):
+    {user_summary}
+
     Conversation History:
     {history_text}
 
-    User's Profile/Questionnaire: "{questionnaire}"
+    User's Onboarding Profile: "{questionnaire}"
 
     User's New Question: "{msg}"
 
-    Respond in a concise, empathetic, and supportive way. Focus on genuinely understanding the person's feelings and providing comforting, actionable guidance. Do NOT provide medical advice or suggest contacting health professionals.
+    Respond in a concise, empathetic, and supportive way. Focus on genuinely understanding the person's feelings and providing comforting, actionable guidance. 
+    Refer to their history/profile if relevant to show you remember them. 
+    Do NOT provide medical advice or suggest contacting health professionals.
     """
     
     response = model.generate_content(prompt)
@@ -211,15 +225,24 @@ def respond(msg, user_id):
 
     # Save to history
     try:
-        client[mongo_db]["chat_history"].insert_one({
-            "user_id": user_id,
+        new_msg = {
+            "user_id": user_id,  # Clerk ID
             "user_msg": msg,
             "assistant_msg": answer,
             "timestamp": time.time()
-        })
-    except Exception as e:
-        print(f"Error saving history: {e}")
+        }
+        client[mongo_db]["chat_history"].insert_one(new_msg)
+        
+        # Trigger lazy memory update (e.g. every message for now for testing, or we can make it probabalistic)
+        # For this prototype, let's just do it. In prod, use background task.
+        # We pass the RECENT history (last 10) + this new message
+        # Append new message to history_list for the summarizer
+        full_recent_history = history_list + [new_msg]
+        update_memory_lazily(user_id, full_recent_history)
 
+    except Exception as e:
+        print(f"Error saving history/memory: {e}")
+    
     return {"final_response": answer}
 
 
@@ -265,7 +288,7 @@ async def detect_video_emotions(user_id, file: UploadFile = File(...)):
 
         try:
             # Try to get transcript
-            transcript = transcribe_latest_concat(default_bucket, k=3, pool=30)
+            transcript = transcribe_latest_concat(default_bucket, k=3, pool=30, user_id=user_id)
         except Exception as e:
             print(f"Transcript error: {e}")
             transcript = ""
@@ -280,7 +303,7 @@ async def detect_video_emotions(user_id, file: UploadFile = File(...)):
            
       
         try:
-            questionnaire = fetch_all_from_mongo("users", {"user_id": user_id})
+            questionnaire = fetch_all_from_mongo("users", {"clerk_user_id": user_id})
         except Exception as e:
             questionnaire = ""
 
@@ -329,7 +352,7 @@ def process_speech(userid):
         
         transcript = ""
         try:
-            transcript = transcribe_latest_concat(default_bucket, k=3, pool=30)
+            transcript = transcribe_latest_concat(default_bucket, k=3, pool=30, user_id=userid)
         except Exception as e:
             print(f"Voice transcript error: {e}")
 
@@ -342,7 +365,7 @@ def process_speech(userid):
                 print(f"Voice RAG error: {e}")
 
         try:
-            questionnaire = fetch_all_from_mongo("users", {"user_id": userid})
+            questionnaire = fetch_all_from_mongo("users", {"clerk_user_id": userid})
         except Exception as e:
             questionnaire = ""
 
@@ -360,6 +383,14 @@ def process_speech(userid):
         response = model.generate_content(prompt)
         answer = (response.text or "").strip()
 
+        # Generate Audio Response
+        audio_b64 = ""
+        try:
+            if answer:
+                audio_b64 = tts.synthesize_text(answer)
+        except Exception as e:
+            print(f"TTS generation failed: {e}")
+
         return {
             "user_id": userid,
             "analysis": analysis,
@@ -367,6 +398,7 @@ def process_speech(userid):
             "file_count": file_count,
             "total_bytes": total_bytes,
             "final_response": answer,
+            "audio_base64": audio_b64
         }
 
     except Exception as e:
@@ -379,5 +411,125 @@ def process_speech(userid):
 
 
 
+@app.post("/analyze_frame")
+async def analyze_frame(file: UploadFile = File(...)):
+    """
+    Analyzes a single image frame for emotion.
+    """
+    try:
+        # Save temp file
+        suffix = os.path.splitext(file.filename)[1] or ".jpg"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+
+        # Detect emotion
+        try:
+            emotion = detector.detect_emotion(cv2.imread(tmp_path))
+        except Exception:
+            emotion = "neutral"
+        
+        os.remove(tmp_path)
+        return {"emotion": emotion}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+from pydantic import BaseModel
+class MultimodalRequest(BaseModel):
+    user_id: str
+    video_emotions: list[str]
+
+@app.post("/process_multimodal")
+def process_multimodal(req: MultimodalRequest):
+    """
+    Processes audio from GCS (Speech->Text->Tone) + Video Emotions list -> Response (Text+Audio).
+    """
+    userid = req.user_id
+    video_emotions = req.video_emotions
+    
+    try:
+        # 1. Audio Processing (Tone + Transcript)
+        prefix = f"users/{userid}/"
+        try:
+            analysis, download_ms, file_count, total_bytes = speech_processor.process_gcs_frames(
+                bucket_name=default_bucket,
+                prefix=prefix
+            )
+        except Exception as e:
+            print(f"Tone analysis error: {e}")
+            analysis = {"phases": [], "distribution": {}, "total_duration": 0.0, "avg_confidence": 0.0}
+            download_ms, file_count, total_bytes = 0, 0, 0
+        
+        transcript = ""
+        try:
+            transcript = transcribe_latest_concat(default_bucket, k=3, pool=30, user_id=userid)
+        except Exception as e:
+            print(f"Voice transcript error: {e}")
+
+        # 2. RAG Context
+        context_text = "No relevant content found."
+        if transcript:
+            try:
+                relevant_chunks = retrieve_chunks(transcript)
+                context_text = "\n".join(relevant_chunks) if relevant_chunks else context_text
+            except Exception as e:
+                print(f"Voice RAG error: {e}")
+
+        # 3. User Profile
+        try:
+            questionnaire = fetch_all_from_mongo("users", {"clerk_user_id": userid})
+        except Exception as e:
+            questionnaire = ""
+
+        # 4. Summarize Video Emotions
+        video_context = ""
+        if video_emotions:
+            counts = Counter(video_emotions)
+            video_context = f"Observed User Emotions during speech: {dict(counts)}. Most distinctive: {counts.most_common(1)[0][0]}"
+        else:
+            video_context = "No video data available."
+
+        # 5. Generate Response
+        prompt = f"""
+        Using the following context, answer the user's question:
+
+        DSM-5 Context:
+        {context_text}
+
+        User Input Transcript: "{transcript}"
+        User Voice Tone Analysis: "{analysis}"
+        User Video Emotion Context: "{video_context}"
+        User's Previous Questionnaire: "{questionnaire}"
+
+        Respond in a concise, empathetic, and supportive way.
+        Use the video emotion context to acknowledge how they look (e.g., "I see you look a bit down...").
+        Do NOT provide medical advice.
+        """
+        
+        response = model.generate_content(prompt)
+        answer = (response.text or "").strip()
+
+        # 6. Generate Audio Response
+        audio_b64 = ""
+        try:
+            if answer:
+                audio_b64 = tts.synthesize_text(answer)
+        except Exception as e:
+            print(f"TTS generation failed: {e}")
+
+        return {
+            "user_id": userid,
+            "transcript": transcript,
+            "final_response": answer,
+            "audio_base64": audio_b64,
+            "video_context": video_context
+        }
+
+    except Exception as e:
+        print(f"Multimodal error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
-    uvicorn.run("main2:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

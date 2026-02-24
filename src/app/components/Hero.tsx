@@ -1,12 +1,13 @@
 // src/app/components/Hero.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import ChatPane from './chat/ChatPane';
 import ModeToggle from './ModeToggle';
 import { useUser } from '@clerk/nextjs';
 import VoiceCircle from './VoiceCircle';
 import VideoRecorder from './VideoRecorder';
+import LiveSession from './LiveSession';
 
 const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
 
@@ -28,12 +29,15 @@ function coerceMode(s: string | undefined | null): ModeChoice {
 export default function Hero() {
   const { user, isLoaded } = useUser();
 
-  const mode: ModeChoice = useMemo(() => {
+  // Initial mode derived from user preferences, but now managed by useState
+  const initialMode: ModeChoice = useMemo(() => {
     if (!isLoaded) return 'voice';
     const pm = (user?.publicMetadata ?? {}) as PublicMetadataShape;
     const picked = pm.preferences?.mode ?? pm.preferredMode ?? pm.mode ?? '';
     return coerceMode(picked);
   }, [isLoaded, user?.publicMetadata]);
+
+  const [mode, setMode] = useState<ModeChoice>(initialMode); // State for mode selection
 
   async function processSpeech() {
     if (!user?.id) return;
@@ -52,55 +56,89 @@ export default function Hero() {
     }
   }
 
-  return (
-    <section className="sticky top-0 z-10 glass mx-6 md:mx-8 2xl:mx-30 my-6 px-6 md:px-10 py-8 md:py-12">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 grid md:grid-cols-2 gap-8 items-start">
-        <div>
-          <h1 className="text-3xl md:text-5xl font-bold text-slate-900">
-            AI Counsellor made for <span className="text-green-800">you</span>.
-          </h1>
-          <p className="mt-5 text-slate-700 leading-relaxed">
-            Personalised plans for pregnancy, PCOS, and sustainable weight
-            management—guided by evidence, designed for real life.
-          </p>
+  const modeLabels = {
+    text: "Chat",
+    voice: "Voice",
+    video: "Live Session"
+  };
 
-          <div className="mt-6">
-            <ModeToggle value={mode} disabled={!isLoaded} />
-          </div>
+  return (
+    <section className="relative flex min-h-screen flex-col items-center justify-center pt-24 pb-12 px-4">
+      {/* Background Mesh (defined in globals.css) */}
+      <div className="bg-mesh" />
+
+      <div className="w-full max-w-4xl mx-auto flex flex-col items-center text-center space-y-8 z-10">
+
+        {/* Header */}
+        <div className="space-y-4 max-w-2xl">
+          <h1 className="text-5xl md:text-6xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60">
+            How are you feeling?
+          </h1>
+          <p className="text-lg text-white/60 font-light">
+            I'm here to listen, whether you want to chat, talk, or share face-to-face.
+          </p>
         </div>
 
-        <div className="flex justify-center">
-          {mode === 'text' ? (
-            <div className="w-full max-w-md">
+        {/* Mode Selector - Tabs */}
+        <div className="p-1 glass-pill inline-flex items-center gap-1">
+          {(['text', 'voice', 'video'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`
+                px-6 py-2 rounded-full text-sm font-medium transition-all duration-300
+                ${mode === m
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/40 hover:text-white/70 hover:bg-white/5'}
+              `}
+            >
+              {modeLabels[m]}
+            </button>
+          ))}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="w-full transition-all duration-500 ease-in-out transform">
+          {mode === 'text' && (
+            <div className="glass-panel w-full max-w-3xl mx-auto h-[600px] overflow-hidden flex flex-col p-1">
               <ChatPane />
             </div>
-          ) : mode === 'voice' ? (
-            <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white/60 p-6 flex flex-col items-center gap-4">
+          )}
+
+          {mode === 'voice' && (
+            <div className="glass-panel w-full max-w-md mx-auto p-8 flex flex-col items-center gap-6 min-h-[400px] justify-center">
               {isLoaded && user?.id ? (
                 <>
                   <VoiceCircle userId={user.id} uploadUrl="/api/audio" />
                   <button
                     onClick={processSpeech}
-                    className="rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+                    className="btn-primary w-full max-w-xs"
                   >
                     Process Speech
                   </button>
                 </>
               ) : (
-                <p className="text-sm text-zinc-600">Sign in to record & process audio.</p>
+                <div className="text-center space-y-4">
+                  <p className="text-white/60">Sign in to start a voice session.</p>
+                  {/* Suggest signing in */}
+                </div>
               )}
             </div>
-          ) : (
-            <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white/60 p-6 flex flex-col items-center gap-4">
+          )}
+
+          {mode === 'video' && (
+            <div className="glass-panel w-full max-w-4xl mx-auto p-4 md:p-8 min-h-[500px] flex items-center justify-center">
               {isLoaded && user?.id ? (
-                <VideoRecorder userId={user.id} />
+                <LiveSession userId={user.id} />
               ) : (
-                <p className="text-sm text-zinc-600">Sign in to record video.</p>
+                <p className="text-white/60">Sign in to start a video session.</p>
               )}
             </div>
           )}
         </div>
+
       </div>
     </section>
   );
 }
+

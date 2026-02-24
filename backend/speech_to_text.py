@@ -42,12 +42,17 @@ def list_users(bucket_name: str, base_prefix: str):
         out.append(user_id)
     return out
 
-def list_latest_objects(bucket_name: str, users_base: str, record_subpath: str, limit=50):
-    """Return newest objects across ALL users, sorted desc by updated time."""
+def list_latest_objects(bucket_name: str, users_base: str, record_subpath: str, limit=50, user_id=None):
+    """Return newest objects. If user_id is provided, only for that user. Else across all."""
     client = _gcs()
     bucket = client.bucket(bucket_name)
     items = []
-    users = list_users(bucket_name, users_base)
+    
+    if user_id:
+        users = [user_id]
+    else:
+        users = list_users(bucket_name, users_base)
+
     for user in users:
         prefix = f"{users_base.rstrip('/')}/{user}/{record_subpath.strip('/')}/"
         blobs = client.list_blobs(bucket, prefix=prefix)
@@ -168,9 +173,9 @@ def collect_last_k_decodable(bucket: str, candidates: list[dict], k: int = 3):
         merged += seg
     return preprocess(merged)
 
-def transcribe_latest_concat(bucket: str, k: int = 3, pool=30) -> str:
-    # newest N across all users (you already have list_latest_objects)
-    candidates = list_latest_objects(bucket, USERS_BASE_PREFIX, RECORD_SUBPATH, limit=pool)
+def transcribe_latest_concat(bucket: str, k: int = 3, pool=30, user_id=None) -> str:
+    # newest N 
+    candidates = list_latest_objects(bucket, USERS_BASE_PREFIX, RECORD_SUBPATH, limit=pool, user_id=user_id)
     merged = collect_last_k_decodable(bucket, candidates, k=k)
     parts = chunk(merged)
     r = sr.Recognizer()

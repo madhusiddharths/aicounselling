@@ -29,7 +29,7 @@ export default function ChatComposer({
     [onSend, value],
   );
 
-  
+
 
 
   const handleKeyDown = useCallback(
@@ -54,7 +54,7 @@ export default function ChatComposer({
     >
       <textarea
         ref={textareaRef}
-        className="w-full resize-none border-0 bg-transparent p-0 text-base placeholder:text-zinc-500 focus:outline-none focus:ring-0"
+        className="w-full resize-none border-0 bg-transparent p-0 text-base text-zinc-900 placeholder:text-zinc-500 focus:outline-none focus:ring-0"
         autoComplete="off"
         name="message"
         placeholder={placeholder}
@@ -77,15 +77,15 @@ export default function ChatComposer({
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="16" 
-                height="16" 
-                viewBox="0 0 24 24" 
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
                 strokeLinejoin="round"
-                className="size-4" 
+                className="size-4"
                 aria-hidden="true"
               >
                 <path d="M18 6 6 18"></path>
@@ -105,15 +105,15 @@ export default function ChatComposer({
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
               fill="none"
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
               strokeLinejoin="round"
-              className="size-4" 
+              className="size-4"
               aria-hidden="true"
             >
               <path d="m5 12 7-7 7 7"></path>

@@ -20,6 +20,8 @@ const VoiceCircle: React.FC<Props> = ({
   size = 200,
 }) => {
   const [isListening, setIsListening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(true); // Mock loaded state for now
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -30,6 +32,7 @@ const VoiceCircle: React.FC<Props> = ({
 
   const start = async () => {
     if (recorderRef.current) return;
+    setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -67,7 +70,7 @@ const VoiceCircle: React.FC<Props> = ({
       setIsListening(true);
     } catch (e) {
       console.error('mic error', e);
-      alert('Microphone permission is required to start voice.');
+      setError('Microphone permission required');
     }
   };
 
@@ -116,8 +119,11 @@ const VoiceCircle: React.FC<Props> = ({
       const res = await fetch(`http://localhost:8000/process_speech?userid=${encodeURIComponent(userId)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.final_response) {
-          alert(`AI Response: ${data.final_response}`);
+
+        // 1. Play Audio if available
+        if (data.audio_base64) {
+          const audio = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
+          audio.play().catch(e => console.error("Audio play error", e));
         }
       }
     } catch (e) {
@@ -139,87 +145,51 @@ const VoiceCircle: React.FC<Props> = ({
 
   // Tailwind-powered circle with green hero palette; minimal-only circle (no X / no text)
   return (
-    <button
-      onClick={onClick}
-      aria-label={isListening ? 'Stop voice' : 'Start voice'}
-      className="relative rounded-full focus:outline-none"
-      style={{ width: size, height: size }}
-    >
-      {/* Outer animated rings (green when active, neutral when idle) */}
-      {isListening && (
-        <>
-          <div
-            className="absolute inset-0 rounded-full border-2 border-emerald-400/70 opacity-30"
-            style={{ animation: 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite' }}
-          />
-          <div
-            className="absolute inset-0 rounded-full border-2 border-emerald-400/70 opacity-20"
-            style={{ animation: 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite', animationDelay: '0.5s' }}
-          />
-          <div
-            className="absolute inset-0 rounded-full border border-emerald-400/70 opacity-10"
-            style={{ animation: 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite', animationDelay: '1s' }}
-          />
-        </>
-      )}
+    <div className="flex flex-col items-center justify-center gap-6 w-full">
+      {/* Visualizer / Microphone Circle */}
+      <div className={`
+        relative flex items-center justify-center w-32 h-32 rounded-full transition-all duration-500
+        ${isListening ? 'bg-red-500/20 shadow-[0_0_50px_rgba(239,68,68,0.4)] scale-110' : 'bg-white/5 shadow-glow'}
+        border border-white/10 backdrop-blur-md
+      `}>
+        <div className={`absolute inset-0 rounded-full border border-white/20 ${isListening ? 'animate-ping opacity-20' : 'opacity-0'}`} />
 
-      {/* Middle halo */}
-      <div
-        className={`absolute inset-4 rounded-full ${isListening ? 'bg-emerald-500/10' : 'bg-slate-600/10'
-          }`}
-        style={{ animation: isListening ? 'wave 3s ease-in-out infinite' : 'none' }}
-      >
-        <div
-          className={`w-full h-full rounded-full border-2 ${isListening ? 'border-emerald-400/50' : 'border-slate-500/30'
-            } backdrop-blur-sm`}
-        />
-      </div>
-
-      {/* Core */}
-      <div className="absolute inset-8 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl flex items-center justify-center">
-        <div
-          className={`absolute inset-0 rounded-full transition-all duration-500 ${isListening
-              ? 'bg-gradient-to-tr from-emerald-500/30 to-teal-400/30'
-              : 'bg-gradient-to-tr from-slate-700/30 to-slate-800/30'
-            }`}
-        />
-        {/* Icon (mic when idle/active) */}
-        <svg
-          className={`relative z-10 w-10 h-10 ${isListening ? 'text-emerald-400' : 'text-slate-400'
-            }`}
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          role="img"
+        <button
+          onClick={onClick}
+          className={`
+            z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300
+            ${isListening
+              ? 'bg-gradient-to-br from-red-500 to-pink-600 text-white shadow-lg scale-90'
+              : 'bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-lg hover:scale-105'}
+          `}
         >
-          <path d="M12 14a3 3 0 003-3V6a3 3 0 10-6 0v5a3 3 0 003 3z" />
-          <path d="M19 11a7 7 0 01-6 6.93V21h-2v-3.07A7 7 0 015 11h2a5 5 0 0010 0h2z" />
-        </svg>
+          {isListening ? (
+            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+            </svg>
+          ) : (
+            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+          )}
+        </button>
       </div>
 
-      {/* Active glow */}
-      {isListening && (
-        <div
-          className="absolute inset-0 rounded-full bg-emerald-400 blur-2xl opacity-20"
-          style={{ animation: 'glow 2s ease-in-out infinite' }}
-        />
-      )}
+      {/* Status Text */}
+      <div className="h-6">
+        <p className={`text-sm font-medium transition-colors ${isListening ? 'text-red-300 animate-pulse' : 'text-white/60'}`}>
+          {isListening ? "Listening..." : "Tap to Speak"}
+        </p>
+      </div>
 
-      {/* Local keyframes to avoid global CSS pollution */}
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); opacity: 0; }
-          50% { transform: scale(1.5); opacity: 0.3; }
-        }
-        @keyframes wave {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.05); }
-        }
-        @keyframes glow {
-          0%, 100% { opacity: 0.2; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
-    </button>
+      {/* Error Message */}
+      {error && (
+        <p className="text-xs text-red-400 bg-red-900/20 px-3 py-1 rounded-full border border-red-500/20">
+          {error}
+        </p>
+      )}
+    </div>
   );
 };
 
