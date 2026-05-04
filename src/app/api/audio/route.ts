@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
 
   // The VoiceCircle component sends 'file', but this route expects 'audio' or 'file'?
-  // Let's handle both or update the component. Hero.tsx shows VoiceCircle sends 'file'.
+  // Fix the uploadUrl string inside VoiceCircle's handle both or update the component. Hero.tsx shows VoiceCircle sends 'file'.
   // audio/route.ts original code used form.get('audio').
   const file = form.get('file') || form.get('audio');
   const tsStr = form.get('timestamp')?.toString();
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unsupported mime' }, { status: 415 });
   }
   const mime = fullMime.startsWith('audio/webm') ? 'audio/webm' : ('audio/mp4' as const);
-  if (buf.length > 5 * 1024 * 1024) {
+  if (buf.length > 50 * 1024 * 1024) { // allow up to 50MB
     return NextResponse.json({ error: 'Frame too large' }, { status: 413 });
   }
 

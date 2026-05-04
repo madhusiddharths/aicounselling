@@ -1,0 +1,60 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+backend/.env
+gen-lang-client-*.json
+*.json.key
+*.pem
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel
+next-env.d.ts
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+ENV/
+.ipynb_checkpoints/
+
+# Build / dist (root level only — keep src/lib, src/build, etc.)
+/build/
+/dist/
+/coverage/
+
+# Generated RAG cache (rebuilt from DSM5.pdf on first run)
+backend/dsm5_chunks.json
+backend/dsm5_embeddings.npy
+backend/dsm5_manifest.json
+backend/document_embeddings.npy
+
+# Local data / test artifacts
+backend/*.log
+backend/test.webm
+backend/tmp/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

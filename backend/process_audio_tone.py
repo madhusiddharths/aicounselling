@@ -1,17 +1,17 @@
-from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtractor
-import torch
-import librosa
-import math
-import numpy as np
 import os
-import io
+import math
 import tempfile
 import time
-from google.cloud import storage
-from collections import Counter
 import warnings
+from collections import Counter
 
-warnings.filterwarnings('ignore')
+import librosa
+import numpy as np
+import torch
+from google.cloud import storage
+from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtractor
+
+warnings.filterwarnings("ignore")
 
 class EnsembleEmotionRecognizer:
     def __init__(self, model_name="r-f/wav2vec-english-speech-emotion-recognition", num_runs=5):
@@ -19,10 +19,6 @@ class EnsembleEmotionRecognizer:
         self.model = Wav2Vec2ForSequenceClassification.from_pretrained(model_name)
         self.model.eval()
         self.num_runs = num_runs
-
-        # Confidence thresholds (unused in logic, kept for clarity)
-        self.high_confidence_threshold = 0.7
-        self.medium_confidence_threshold = 0.5
 
     def is_valid_speech(self, audio_chunk: np.ndarray, sr: int) -> bool:
         """Basic sanity checks to skip silence/noise chunks."""
@@ -212,33 +208,6 @@ class SpeechProcessor:
     def process_file(self, path: str):
         return analyze_audio_ensemble(path, num_runs=self.recognizer.num_runs)
 
-    def process_gcs(self, bucket_name: str, key: str, gcs_client=None):
-        """
-        Download a single GCS object to a temp file (preserving suffix),
-        analyze, and return (analysis_dict, download_ms).
-        """
-        client = gcs_client or storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(key)
-        
-        suffix = (os.path.splitext(key)[1] or ".wav").lower()
-        t0 = time.time()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            blob.download_to_filename(tmp.name)
-            tmp_path = tmp.name
-        download_ms = int((time.time() - t0) * 1000)
-
-        try:
-            analysis = analyze_audio_ensemble(tmp_path, num_runs=self.recognizer.num_runs)
-            if analysis is None:
-                analysis = {"phases": [], "distribution": {}, "total_duration": 0.0, "avg_confidence": 0.0}
-            return analysis, download_ms
-        finally:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
     def process_gcs_frames(self, bucket_name: str, prefix: str, gcs_client=None):
         """
         List all audio objects under gs://bucket/prefix, download each to a temp file,
@@ -295,14 +264,3 @@ class SpeechProcessor:
             analysis = {"phases": [], "distribution": {}, "total_duration": 0.0, "avg_confidence": 0.0}
 
         return analysis, download_ms, len(found_blobs), total_bytes
-
-
-
-# if __name__ == "__main__":
-#     # Only runs if you `python speech.py` directly; importing from FastAPI won't hit this.
-#     test_path = os.environ.get("LOCAL_TEST_AUDIO", "")
-#     if not test_path:
-#         print("Set LOCAL_TEST_AUDIO=/path/to/file.(wav|mp3|m4a|flac|webm) and run again.")
-#     else:
-#         out = analyze_audio_ensemble(test_path, num_runs=5)
-#         print(out)

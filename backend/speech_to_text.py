@@ -1,7 +1,9 @@
-# sr_transcribe_gcs_auto_robust.py
-import os, tempfile, subprocess, json
+import os
+import tempfile
+import subprocess
 from io import BytesIO
 from pathlib import Path
+
 from dotenv import load_dotenv
 from google.cloud import storage
 import speech_recognition as sr
@@ -123,43 +125,7 @@ def chunk(seg: AudioSegment, seconds=CHUNK_SEC):
     step = int(seconds * 1000)
     return [seg[i:i+step] for i in range(0, len(seg), step)]
 
-def transcribe_key(bucket: str, key: str) -> str:
-    print(f"Trying: s3://{bucket}/{key}")
-    local = download_to_temp(bucket, key)
-    try:
-        raw = load_audio_robust(local)      # <-- tolerant loader
-        audio = preprocess(raw)
-        parts = chunk(audio)
-        r = sr.Recognizer()
-        texts = []
-        with tempfile.TemporaryDirectory() as td:
-            for i, p in enumerate(parts, 1):
-                wav_path = os.path.join(td, f"part_{i}.wav")
-                p.export(wav_path, format="wav")
-                with sr.AudioFile(wav_path) as src:
-                    r.adjust_for_ambient_noise(src, duration=0.3)
-                    audio_chunk = r.record(src)
-                try:
-                    res = r.recognize_google(audio_chunk, language=LANG, show_all=True)
-                    if isinstance(res, dict) and res.get("alternative"):
-                        best = max(res["alternative"], key=lambda a: a.get("confidence", 0))
-                        texts.append((best.get("transcript") or "").strip())
-                    else:
-                        texts.append(r.recognize_google(audio_chunk, language=LANG).strip())
-                    print(f"[{i}/{len(parts)}] ✓")
-                except sr.UnknownValueError:
-                    print(f"[{i}/{len(parts)}] (no speech recognized)")
-                except sr.RequestError as e:
-                    raise SystemExit(f"[{i}/{len(parts)}] API error: {e}")
-        out = " ".join(t for t in texts if t).strip()
-        if not out:
-            raise RuntimeError("Empty transcript (audio may be silence).")
-        return out
-    finally:
-        try: os.remove(local)
-        except OSError: pass
-
-# Global cache of processed keys to prevent replaying the same question
+# Global cache of processed keys to prevent replaying the same question across calls
 PROCESSED_AUDIO_KEYS = set()
 
 def collect_last_k_decodable(bucket: str, candidates: list[dict], k: int = 3):
@@ -198,11 +164,27 @@ def collect_last_k_decodable(bucket: str, candidates: list[dict], k: int = 3):
         merged += seg
     return preprocess(merged)
 
-def transcribe_latest_concat(bucket: str, k: int = 3, pool=30, user_id=None) -> str:
-    # newest N 
-    candidates = list_latest_objects(bucket, USERS_BASE_PREFIX, RECORD_SUBPATH, limit=pool, user_id=user_id)
-    merged = collect_last_k_decodable(bucket, candidates, k=k)
-    parts = chunk(merged)
+def _recognize_segment(audio_chunk, idx: int, total: int) -> str:
+    r = sr.Recognizer()
+    try:
+        res = r.recognize_google(audio_chunk, language=LANG, show_all=True)
+        if isinstance(res, dict) and res.get("alternative"):
+            best = max(res["alternative"], key=lambda a: a.get("confidence", 0))
+            text = (best.get("transcript") or "").strip()
+        else:
+            text = r.recognize_google(audio_chunk, language=LANG).strip()
+        print(f"[{idx}/{total}] ✓")
+        return text
+    except sr.UnknownValueError:
+        print(f"[{idx}/{total}] (no speech recognized)")
+        return ""
+    except sr.RequestError as e:
+        print(f"[{idx}/{total}] API error: {e}")
+        return ""
+
+
+def _transcribe_segment(seg: AudioSegment) -> str:
+    parts = chunk(seg)
     r = sr.Recognizer()
     out = []
     with tempfile.TemporaryDirectory() as td:
@@ -212,17 +194,24 @@ def transcribe_latest_concat(bucket: str, k: int = 3, pool=30, user_id=None) -> 
             with sr.AudioFile(wav) as src:
                 r.adjust_for_ambient_noise(src, duration=0.3)
                 audio_chunk = r.record(src)
-            try:
-                res = r.recognize_google(audio_chunk, language=LANG, show_all=True)
-                if isinstance(res, dict) and res.get("alternative"):
-                    best = max(res["alternative"], key=lambda a: a.get("confidence", 0))
-                    out.append((best.get("transcript") or "").strip())
-                else:
-                    out.append(r.recognize_google(audio_chunk, language=LANG).strip())
-                print(f"[{i}/{len(parts)}] ✓")
-            except sr.UnknownValueError:
-                print(f"[{i}/{len(parts)}] (no speech recognized)")
-            except sr.RequestError as e:
-                raise SystemExit(f"[{i}/{len(parts)}] API error: {e}")
-    return " ".join(t for t in out if t).strip()
+            text = _recognize_segment(audio_chunk, i, len(parts))
+            if text:
+                out.append(text)
+    return " ".join(out).strip()
+
+
+def transcribe_latest_concat(bucket: str, k: int = 3, pool=30, user_id=None) -> str:
+    candidates = list_latest_objects(bucket, USERS_BASE_PREFIX, RECORD_SUBPATH, limit=pool, user_id=user_id)
+    merged = collect_last_k_decodable(bucket, candidates, k=k)
+    return _transcribe_segment(merged)
+
+
+def transcribe_local(local_path: str) -> str:
+    """Transcribe a local audio/video file directly."""
+    try:
+        raw = load_audio_robust(local_path)
+        return _transcribe_segment(preprocess(raw))
+    except Exception as e:
+        print(f"transcribe_local error: {e}")
+        return ""
 

@@ -5,21 +5,38 @@ import React, { useEffect, useRef, useState } from 'react';
 type Props = {
     userId: string;
 };
+function pickSupportedMime(): string {
+    const prefs = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+    ];
+    for (const m of prefs) {
+        if ((window as typeof window & { MediaRecorder: typeof MediaRecorder }).MediaRecorder?.isTypeSupported?.(m)) {
+            return m;
+        }
+    }
+    return 'video/webm';
+}
 
 export default function LiveSession({ userId }: Props) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [status, setStatus] = useState("Idle");
+    const [reply, setReply] = useState<string>("");
+    const [liveEmotion, setLiveEmotion] = useState<string>("");
     const emotionsRef = useRef<string[]>([]);
 
-    // Audio Refs
+    // Audio/Video Refs
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const audioSeqRef = useRef(0);
+    const audioChunksRef = useRef<Blob[]>([]);
 
     const startSession = async () => {
         try {
             setStatus("Initializing...");
+            setReply("");
+            setLiveEmotion("");
             const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             streamRef.current = stream;
             if (videoRef.current) {
@@ -34,8 +51,16 @@ export default function LiveSession({ userId }: Props) {
             // 1. Start Video Analysis Loop (Frame Capture)
             startVideoLoop(stream);
 
-            // 2. Start Audio Recording Loop (Chunk Uploads)
-            startAudioLoop(stream);
+            // 2. Start Full Audio/Video Recording
+            const mime = pickSupportedMime();
+            const mr = new MediaRecorder(stream, { mimeType: mime });
+            mediaRecorderRef.current = mr;
+
+            audioChunksRef.current = [];
+            mr.ondataavailable = (ev) => {
+                if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+            };
+            mr.start();
 
         } catch (e) {
             console.error("Session start error", e);
@@ -43,44 +68,63 @@ export default function LiveSession({ userId }: Props) {
         }
     };
 
+    const stopRecording = (): Promise<Blob | null> => {
+        return new Promise((resolve) => {
+            if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+                resolve(null);
+                return;
+            }
+            mediaRecorderRef.current.onstop = () => {
+                const blob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current!.mimeType || 'video/webm' });
+                audioChunksRef.current = [];
+                resolve(blob);
+            };
+            mediaRecorderRef.current.stop();
+        });
+    };
+
     const stopSession = async () => {
         setStatus("Processing final response...");
         setIsSessionActive(false);
 
         // Stop Media
+        if (videoRef.current) videoRef.current.srcObject = null;
+
+        const blob = await stopRecording();
+
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(t => t.stop());
             streamRef.current = null;
         }
-        if (videoRef.current) videoRef.current.srcObject = null;
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
+
+        if (!blob || blob.size === 0) {
+            setStatus("Idle");
+            return;
         }
 
-        // Call Backend for Final Response
         try {
-            const res = await fetch("http://localhost:8000/process_multimodal", {
+            const formData = new FormData();
+            formData.append('file', new File([blob], `session.webm`, { type: blob.type }));
+            formData.append('client_emotions', JSON.stringify(emotionsRef.current));
+
+            const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
+            const res = await fetch(`${FASTAPI_BASE_URL}/detect_video_emotions?user_id=${encodeURIComponent(userId)}`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    user_id: userId,
-                    video_emotions: emotionsRef.current
-                })
+                body: formData
             });
 
             if (res.ok) {
                 const data = await res.json();
-                console.log("Multimodal Response:", data);
+                console.log("Video Response:", data);
+                setReply(data.final_response || "");
                 setStatus("Replying...");
 
-                // Play Audio
                 if (data.audio_base64) {
                     const audio = new Audio(`data:audio/mp3;base64,${data.audio_base64}`);
                     audio.play();
                     audio.onended = () => setStatus("Idle");
                 } else {
                     setStatus("Idle");
-                    alert(data.final_response);
                 }
             } else {
                 setStatus("Error processing response.");
@@ -101,13 +145,11 @@ export default function LiveSession({ userId }: Props) {
 
             try {
                 const blob = await imageCapture.takePhoto();
-                // Send to backend
                 const formData = new FormData();
                 formData.append("file", blob, "frame.jpg");
 
-                // Fire and forget - don't await to block loop too long? 
-                // Or await to prevent flooding? Let's await.
-                const res = await fetch("http://localhost:8000/analyze_frame", {
+                const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
+                const res = await fetch(`${FASTAPI_BASE_URL}/analyze_frame`, {
                     method: "POST",
                     body: formData
                 });
@@ -115,8 +157,7 @@ export default function LiveSession({ userId }: Props) {
                     const data = await res.json();
                     if (data.emotion && data.emotion !== "No face") {
                         emotionsRef.current.push(data.emotion);
-                        // Optional: visual feedback
-                        console.log("Detected:", data.emotion);
+                        setLiveEmotion(data.emotion);
                     }
                 }
             } catch (e) {
@@ -128,30 +169,6 @@ export default function LiveSession({ userId }: Props) {
             }
         };
         loop();
-    };
-
-    // --- Audio Recording Helpers ---
-    const startAudioLoop = (stream: MediaStream) => {
-        audioSeqRef.current = 0;
-        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-        const mr = new MediaRecorder(stream, { mimeType: mime });
-        mediaRecorderRef.current = mr;
-
-        mr.ondataavailable = async (ev) => {
-            if (ev.data.size > 0) {
-                const seq = audioSeqRef.current++;
-                const file = new File([ev.data], `frame_${seq}.webm`, { type: ev.data.type });
-                const form = new FormData();
-                form.append('file', file);
-                form.append('userId', userId);
-                form.append('timestamp', String(Date.now()));
-                form.append('frameId', String(seq));
-
-                await fetch("/api/uploadAudio", { method: 'POST', body: form }).catch(e => console.error("Audio upload fail", e));
-            }
-        };
-
-        mr.start(2000); // chunk every 2s
     };
 
     return (
@@ -170,11 +187,18 @@ export default function LiveSession({ userId }: Props) {
                     {status}
                 </div>
 
-                {/* Emotions Overlay (Optional Debug) */}
-                {/* <div className="absolute bottom-4 left-4 text-xs text-white/50 bg-black/20 p-2 rounded">
-              {emotionsRef.current.length} frames analyzed
-           </div> */}
+                {liveEmotion && isSessionActive && (
+                    <div className="absolute top-4 right-4 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white/90 text-sm font-medium shadow-lg">
+                        {liveEmotion}
+                    </div>
+                )}
             </div>
+
+            {reply && !isSessionActive && (
+                <div className="w-full max-w-3xl px-6 py-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 text-white/90 text-base leading-relaxed shadow-lg whitespace-pre-wrap">
+                    {reply}
+                </div>
+            )}
 
             <div className="flex gap-4">
                 {!isSessionActive ? (
