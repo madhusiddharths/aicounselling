@@ -75,7 +75,7 @@ export default function Hero() {
             How are you feeling?
           </h1>
           <p className="text-lg text-white/60 font-light">
-            I'm here to listen, whether you want to chat, talk, or share face-to-face.
+            I&apos;m here to listen, whether you want to chat, talk, or share face-to-face.
           </p>
         </div>
 
@@ -135,4 +135,3 @@ export default function Hero() {
     </section>
   );
 }
-
