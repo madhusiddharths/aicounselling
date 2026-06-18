@@ -1,14 +1,12 @@
 // src/app/api/audio/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
-import { Storage } from '@google-cloud/storage';
 import { auth } from '@clerk/nextjs/server';
 import { insertAudioMeta } from '@/db/audio';
+import { getStorage } from '@/lib/gcs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const storage = new Storage();
 
 export async function POST(req: NextRequest) {
   const BUCKET_NAME = process.env.GCS_BUCKET!;
@@ -50,7 +48,7 @@ export async function POST(req: NextRequest) {
   console.log('[audio] uploading to GCS', { userId, frameNumber, ts_ms, mime, bytes: buf.length, key });
 
   try {
-    const bucket = storage.bucket(BUCKET_NAME);
+    const bucket = getStorage().bucket(BUCKET_NAME);
     const gcsFile = bucket.file(key);
     await gcsFile.save(buf, {
       contentType: fullMime,

@@ -12,6 +12,7 @@
     "@auth0/nextjs-auth0": "^4.10.0",
     "@clerk/nextjs": "^6.33.0",
     "@google-cloud/storage": "^7.18.0",
+    "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.12.2",
     "express": "^5.1.0",
     "express-openid-connect": "^2.19.2",

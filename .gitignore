@@ -46,6 +46,12 @@ backend/test.webm
 backend/tmp/
 *.log
 
+# HF Space deploy clone (separate git repo — never commit into this one)
+hf-space/
+
+# Claude Code local state
+.claude/
+
 # IDE / OS
 .vscode/
 .idea/
@@ -53,6 +59,7 @@ backend/tmp/
 *.swp
 *.swo
 *~
+.Rhistory
 
 # Logs
 npm-debug.log*

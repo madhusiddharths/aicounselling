@@ -27,6 +27,10 @@ __pycache__
 .env
 .env.*
 backend/.env
+gen-lang-client-*.json
+*-service-account*.json
+*.json.key
+*.pem
 
 # IDE / OS
 .idea

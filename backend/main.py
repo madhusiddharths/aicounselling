@@ -9,10 +9,8 @@ from collections import Counter
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-import cv2
 import uvicorn
 import google.generativeai as genai
-from deepface import DeepFace
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -144,14 +142,6 @@ def is_high_risk(text: str) -> bool:
     return any(term in text for term in CRISIS_TERMS)
 
 
-def detect_emotion(frame) -> str:
-    try:
-        result = DeepFace.analyze(frame, actions=["emotion"], enforce_detection=False)
-        return result[0]["dominant_emotion"]
-    except Exception:
-        return "No face"
-
-
 def fetch_questionnaire(user_id: str):
     try:
         rows = fetch_all_from_mongo("users", {"clerk_user_id": user_id})
@@ -260,6 +250,7 @@ async def detect_video_emotions(
         tmp_path = tmp.name
 
     try:
+        # Face emotions are detected in the browser and sent as a JSON list.
         emotions, frame_count = [], 0
         if client_emotions:
             try:
@@ -268,9 +259,6 @@ async def detect_video_emotions(
                     emotions = [str(e) for e in provided if e and e != "No face"]
             except Exception as e:
                 print(f"client_emotions parse error: {e}")
-
-        if not emotions:
-            emotions, frame_count = sample_video_emotions(tmp_path, target_fps=1.0, max_frames=60)
 
         final_emotion = Counter(emotions).most_common(1)[0][0] if emotions else "No face detected"
 
@@ -328,35 +316,6 @@ User just said: "{transcript}"
             pass
 
 
-def sample_video_emotions(video_path: str, target_fps: float = 1.0, max_frames: int = 60):
-    """Run DeepFace on a sampled subset of frames. Returns (emotions, frames_seen)."""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return [], 0
-
-    src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    stride = max(1, int(round(src_fps / target_fps)))
-
-    emotions = []
-    frame_idx = 0
-    sampled = 0
-    try:
-        while sampled < max_frames:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if frame_idx % stride == 0:
-                emo = detect_emotion(frame)
-                if emo != "No face":
-                    emotions.append(emo)
-                sampled += 1
-            frame_idx += 1
-    finally:
-        cap.release()
-
-    return emotions, frame_idx
-
-
 @app.get("/process_speech")
 def process_speech(userid):
     """Process all audio frames in GCS under users/{userid}/ for tone + transcript."""
@@ -411,28 +370,6 @@ User just said: "{transcript}"
             {"error": "No speech recognized or processing failed", "details": str(e)},
             status_code=400,
         )
-
-
-@app.post("/analyze_frame")
-async def analyze_frame(file: UploadFile = File(...)):
-    """Analyze a single image frame for emotion."""
-    suffix = os.path.splitext(file.filename)[1] or ".jpg"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-    try:
-        try:
-            emotion = detect_emotion(cv2.imread(tmp_path))
-        except Exception:
-            emotion = "neutral"
-        return {"emotion": emotion}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    finally:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
 
 
 class MultimodalRequest(BaseModel):

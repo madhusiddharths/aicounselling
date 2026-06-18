@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Storage } from '@google-cloud/storage';
+import { getStorage } from '@/lib/gcs';
 
 export const runtime = 'nodejs';
 
-const storage = new Storage();
-
 export async function POST(req: NextRequest) {
   const BUCKET = process.env.GCS_BUCKET ?? '';
-  const bucket = storage.bucket(BUCKET);
+  const bucket = getStorage().bucket(BUCKET);
   if (!BUCKET) {
     return NextResponse.json({ error: 'GCS not configured' }, { status: 500 });
   }

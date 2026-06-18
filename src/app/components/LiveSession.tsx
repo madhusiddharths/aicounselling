@@ -1,22 +1,38 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import type * as FaceApi from '@vladmandic/face-api';
 
 type Props = {
     userId: string;
 };
-function pickSupportedMime(): string {
-    const prefs = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm',
-    ];
+
+// face-api is dynamically imported (browser-only) so it never runs during SSR.
+// Models live in /public/models and are served statically. Load once per page.
+let faceapi: typeof FaceApi | null = null;
+let faceModelsLoaded = false;
+async function loadFaceModels(): Promise<typeof FaceApi> {
+    if (!faceapi) {
+        faceapi = await import('@vladmandic/face-api');
+    }
+    if (!faceModelsLoaded) {
+        await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+            faceapi.nets.faceExpressionNet.loadFromUri('/models'),
+        ]);
+        faceModelsLoaded = true;
+    }
+    return faceapi;
+}
+
+function pickAudioMime(): string {
+    const prefs = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
     for (const m of prefs) {
         if ((window as typeof window & { MediaRecorder: typeof MediaRecorder }).MediaRecorder?.isTypeSupported?.(m)) {
             return m;
         }
     }
-    return 'video/webm';
+    return 'audio/webm';
 }
 
 export default function LiveSession({ userId }: Props) {
@@ -28,32 +44,40 @@ export default function LiveSession({ userId }: Props) {
     const [liveEmotion, setLiveEmotion] = useState<string>("");
     const emotionsRef = useRef<string[]>([]);
 
-    // Audio/Video Refs
+    // Audio-only recorder (we keep the video stream for preview + in-browser
+    // emotion detection, but only upload audio to the backend).
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
+    const faceLoopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const startSession = async () => {
         try {
             setStatus("Initializing...");
             setReply("");
             setLiveEmotion("");
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+            // Kick off model load + camera in parallel.
+            const [stream, fa] = await Promise.all([
+                navigator.mediaDevices.getUserMedia({ video: true, audio: true }),
+                loadFaceModels(),
+            ]);
             streamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                videoRef.current.play();
+                await videoRef.current.play();
             }
 
             emotionsRef.current = [];
             setIsSessionActive(true);
             setStatus("Listening & Watching...");
 
-            // 1. Start Video Analysis Loop (Frame Capture)
-            startVideoLoop(stream);
+            // 1. In-browser face-emotion loop (no backend round-trips).
+            startVideoLoop(fa);
 
-            // 2. Start Full Audio/Video Recording
-            const mime = pickSupportedMime();
-            const mr = new MediaRecorder(stream, { mimeType: mime });
+            // 2. Record AUDIO ONLY — the backend only needs audio for transcript + tone.
+            const audioStream = new MediaStream(stream.getAudioTracks());
+            const mime = pickAudioMime();
+            const mr = new MediaRecorder(audioStream, { mimeType: mime });
             mediaRecorderRef.current = mr;
 
             audioChunksRef.current = [];
@@ -75,7 +99,7 @@ export default function LiveSession({ userId }: Props) {
                 return;
             }
             mediaRecorderRef.current.onstop = () => {
-                const blob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current!.mimeType || 'video/webm' });
+                const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                 audioChunksRef.current = [];
                 resolve(blob);
             };
@@ -87,7 +111,11 @@ export default function LiveSession({ userId }: Props) {
         setStatus("Processing final response...");
         setIsSessionActive(false);
 
-        // Stop Media
+        // Stop the face loop and media preview.
+        if (faceLoopRef.current) {
+            clearTimeout(faceLoopRef.current);
+            faceLoopRef.current = null;
+        }
         if (videoRef.current) videoRef.current.srcObject = null;
 
         const blob = await stopRecording();
@@ -104,6 +132,7 @@ export default function LiveSession({ userId }: Props) {
 
         try {
             const formData = new FormData();
+            // Audio-only blob — kept as .webm so the backend's splitext + ffmpeg/pydub path works.
             formData.append('file', new File([blob], `session.webm`, { type: blob.type }));
             formData.append('client_emotions', JSON.stringify(emotionsRef.current));
 
@@ -135,41 +164,55 @@ export default function LiveSession({ userId }: Props) {
         }
     };
 
-    // --- Video Analysis Helpers ---
-    const startVideoLoop = (stream: MediaStream) => {
-        const track = stream.getVideoTracks()[0];
-        const imageCapture = new (window as any).ImageCapture(track);
+    // --- In-browser emotion detection (replaces per-second /analyze_frame calls) ---
+    const startVideoLoop = (fa: typeof FaceApi) => {
+        const options = new fa.TinyFaceDetectorOptions();
 
         const loop = async () => {
-            if (!stream.active || !streamRef.current) return;
+            const video = videoRef.current;
+            if (!streamRef.current?.active || !video || video.readyState < 2) {
+                if (streamRef.current?.active) {
+                    faceLoopRef.current = setTimeout(loop, 1000);
+                }
+                return;
+            }
 
             try {
-                const blob = await imageCapture.takePhoto();
-                const formData = new FormData();
-                formData.append("file", blob, "frame.jpg");
+                const result = await fa
+                    .detectSingleFace(video, options)
+                    .withFaceExpressions();
 
-                const FASTAPI_BASE_URL = process.env.NEXT_PUBLIC_FASTAPI_BASE_URL || 'http://localhost:8000';
-                const res = await fetch(`${FASTAPI_BASE_URL}/analyze_frame`, {
-                    method: "POST",
-                    body: formData
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.emotion && data.emotion !== "No face") {
-                        emotionsRef.current.push(data.emotion);
-                        setLiveEmotion(data.emotion);
+                if (result?.expressions) {
+                    const top = result.expressions.asSortedArray()[0];
+                    if (top && top.probability > 0.3) {
+                        emotionsRef.current.push(top.expression);
+                        setLiveEmotion(top.expression);
                     }
                 }
             } catch (e) {
-                console.warn("Frame capture error", e);
+                console.warn("Face detection error", e);
             }
 
             if (streamRef.current?.active) {
-                setTimeout(loop, 1000); // 1 FPS
+                faceLoopRef.current = setTimeout(loop, 1000); // ~1 FPS
             }
         };
         loop();
     };
+
+    // Cleanup on unmount.
+    useEffect(() => {
+        return () => {
+            if (faceLoopRef.current) clearTimeout(faceLoopRef.current);
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+                try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
+            }
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
+        };
+    }, []);
 
     return (
         <div className="flex flex-col items-center gap-6 w-full h-full p-4 relative">
