@@ -17,7 +17,7 @@
     "express": "^5.1.0",
     "express-openid-connect": "^2.19.2",
     "mongoose": "^8.18.2",
-    "next": "15.5.4",
+    "next": "15.5.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-markdown": "^10.1.0",
