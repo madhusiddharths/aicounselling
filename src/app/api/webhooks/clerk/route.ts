@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { upsertUserFromClerk } from '@/db/users';
 import { getDb } from '@/lib/mongo';
 
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
 // Make the secret non-nullable for TS
 const SECRET = process.env.CLERK_SECRET_KEY!;
 if (!SECRET) {

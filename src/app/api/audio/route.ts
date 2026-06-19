@@ -7,6 +7,7 @@ import { getStorage } from '@/lib/gcs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const BUCKET_NAME = process.env.GCS_BUCKET!;
