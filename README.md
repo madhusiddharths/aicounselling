@@ -37,7 +37,7 @@ npm run dev
 
 - **Frontend**: Next.js 15, React 19, Tailwind CSS, Clerk (Auth)
 - **Backend**: FastAPI, Python 3.12, Uvicorn
-- **AI/ML**: Google Gemini (LLM), DeepFace (Emotion Detection), Wav2vec2 (Tone Analysis), Sentence Transformers (RAG)
+- **AI/ML**: Google Gemini (LLM), face-api.js (in-browser facial emotion — camera frames never leave the device), Wav2vec2 (Tone Analysis), Sentence Transformers (RAG)
 - **Database**: MongoDB Atlas
 - **Storage**: Google Cloud Storage (GCS)
 - **Libraries**: Librosa, Pydub, PyPDF2, Faiss-cpu, OpenCV
